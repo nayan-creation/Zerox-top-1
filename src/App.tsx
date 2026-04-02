@@ -139,6 +139,9 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(new Date().toLocaleTimeString());
   const [isSpeechSupported, setIsSpeechSupported] = useState(false);
   const [isMicSupported, setIsMicSupported] = useState(false);
+  const [aiRetryCount, setAiRetryCount] = useState(0);
+  const [isAiReady, setIsAiReady] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
 
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -153,36 +156,45 @@ export default function App() {
 
   // Initialize AI
   useEffect(() => {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
+    setIsAiReady(false);
+    const apiKey = process.env.GEMINI_API_KEY || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+    if (!apiKey || apiKey === "undefined") {
       console.error("GEMINI_API_KEY is missing. AI features will not work.");
       return;
     }
 
-    const ai = new GoogleGenAI({ apiKey });
-    aiRef.current = ai;
-    
-    // Map history for Gemini SDK
-    const history = messages.map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    }));
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      aiRef.current = ai;
+      
+      // Map history for Gemini SDK
+      const history = messages.map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+      }));
 
-    chatRef.current = ai.chats.create({
-      model: "gemini-3-flash-preview",
-      history: history,
-      config: {
-        systemInstruction: `You are ZEROX, a futuristic, intelligent, and loyal personal AI assistant. 
-        You address the user as "Boss". Your tone is professional yet friendly, similar to Jarvis from Iron Man.
-        If the user asks "who are you?", you MUST respond that you were developed by Nayan.
-        Keep responses concise but helpful. You have access to the user's name: ${prefs.name}.
-        Current Time: ${currentTime}. 
-        User Location: ${address || location || 'Unknown'}. 
-        Current Weather: ${weather || 'Unknown'}.
-        If the user asks for weather or local info, use this data. You can also suggest nearby activities based on the weather.`
-      }
-    });
-  }, [prefs.name, location, weather, address, currentTime]);
+      chatRef.current = ai.chats.create({
+        model: "gemini-3-flash-preview",
+        history: history,
+        config: {
+          systemInstruction: `You are ZEROX, a futuristic, intelligent, and loyal personal AI assistant. 
+          You address the user as "Boss". Your tone is professional yet friendly, similar to Jarvis from Iron Man.
+          If the user asks "who are you?", you MUST respond: "I was developed by Nayan."
+          Keep responses concise but helpful. You have access to the user's name: ${prefs.name}.
+          Current Time: ${new Date().toLocaleTimeString()}. 
+          User Location: ${address || location || 'Unknown'}. 
+          Current Weather: ${weather || 'Unknown'}.
+          If the user asks for weather or local info, use this data. You can also suggest nearby activities based on the weather.`
+        }
+      });
+      setIsAiReady(true);
+    } catch (e) {
+      console.error("AI Initialization failed:", e);
+      setIsAiReady(false);
+    } finally {
+      setIsRepairing(false);
+    }
+  }, [prefs.name, location, weather, address, aiRetryCount]);
 
   // Update Time
   useEffect(() => {
@@ -468,8 +480,8 @@ export default function App() {
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInput('');
 
-    if (!chatRef.current) {
-      const errorMsg = "I apologize, Boss, but my AI core is not initialized. Please check your configuration.";
+    if (!isAiReady || !chatRef.current) {
+      const errorMsg = "I apologize, Boss, but my AI core is not initialized. Please try the 'Repair AI Core' button in settings.";
       setMessages(prev => [...prev, { role: 'assistant', content: errorMsg }]);
       speak(errorMsg);
       return;
@@ -517,7 +529,7 @@ export default function App() {
         {/* Watermark */}
         <div className="absolute inset-0 flex items-center justify-center opacity-[0.03] select-none">
           <h2 className="text-[15vw] font-black tracking-[0.2em] uppercase rotate-[-15deg] whitespace-nowrap">
-            Nayan Creation
+            NAYAN CREATION
           </h2>
         </div>
       </div>
@@ -550,6 +562,10 @@ export default function App() {
                 <Sun size={14} /> {weather}
               </div>
             )}
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] uppercase font-bold tracking-wider ${isAiReady ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20 animate-pulse'}`}>
+              <div className={`w-1.5 h-1.5 rounded-full ${isAiReady ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)]'}`} />
+              {isAiReady ? 'Core Online' : 'Core Offline'}
+            </div>
           </div>
           <button 
             onClick={() => setIsSettingsOpen(true)}
@@ -801,6 +817,24 @@ export default function App() {
                       <Mic size={14} /> Voice Input
                     </div>
                   </div>
+                </div>
+
+                {/* Repair AI Core */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-medium">AI Core Status</h3>
+                    <p className="text-xs opacity-50">Repair connection if AI is not responding</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setIsRepairing(true);
+                      setAiRetryCount(c => c + 1);
+                      speak("Attempting to repair AI core systems, Boss.");
+                    }}
+                    className="p-3 bg-indigo-500/10 rounded-xl border border-indigo-500/30 text-indigo-500 hover:bg-indigo-500/20 transition-all"
+                  >
+                    <RefreshCw size={20} className={isRepairing ? 'animate-spin' : ''} />
+                  </button>
                 </div>
 
                 {/* Clear Chat */}
