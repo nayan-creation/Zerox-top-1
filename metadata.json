@@ -1,0 +1,8 @@
+{
+  "name": "ZEROX AI Assistant",
+  "description": "A futuristic personal AI assistant with 3D avatar, voice interaction, and location awareness.",
+  "requestFramePermissions": [
+    "microphone",
+    "geolocation"
+  ]
+}
