@@ -68,24 +68,67 @@ const ZeroxAvatar = ({ isSpeaking, isListening }: { isSpeaking: boolean, isListe
   );
 };
 
+// --- Error Boundary ---
+export class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error: any, errorInfo: any) { console.error("App Error:", error, errorInfo); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center p-6 text-center">
+          <div className="max-w-md space-y-4">
+            <h1 className="text-2xl font-bold text-red-500">System Failure</h1>
+            <p className="opacity-60">Zerox encountered a critical error. This usually happens due to corrupted local data or browser restrictions.</p>
+            <button 
+              onClick={() => { localStorage.clear(); window.location.reload(); }}
+              className="px-6 py-3 bg-indigo-600 rounded-xl font-medium hover:bg-indigo-500 transition-all"
+            >
+              Reset System Data
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // --- Main App Component ---
 export default function App() {
   // State
   const [prefs, setPrefs] = useState<UserPreferences>(() => {
-    const saved = localStorage.getItem('zerox_prefs');
-    return saved ? JSON.parse(saved) : {
-      name: '',
-      voiceMode: 'female',
-      voiceEnabled: true,
-      theme: 'dark',
-      hasLaunched: false
-    };
+    try {
+      const saved = localStorage.getItem('zerox_prefs');
+      return saved ? JSON.parse(saved) : {
+        name: '',
+        voiceMode: 'female',
+        voiceEnabled: true,
+        theme: 'dark',
+        hasLaunched: false
+      };
+    } catch (e) {
+      return {
+        name: '',
+        voiceMode: 'female',
+        voiceEnabled: true,
+        theme: 'dark',
+        hasLaunched: false
+      };
+    }
   });
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<{ role: 'user' | 'assistant', content: string }[]>(() => {
-    const saved = localStorage.getItem('zerox_history');
-    return saved ? JSON.parse(saved) : [];
+    try {
+      const saved = localStorage.getItem('zerox_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
   });
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -110,7 +153,13 @@ export default function App() {
 
   // Initialize AI
   useEffect(() => {
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error("GEMINI_API_KEY is missing. AI features will not work.");
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
     aiRef.current = ai;
     
     // Map history for Gemini SDK
@@ -312,9 +361,20 @@ export default function App() {
 
   // Load Voices
   useEffect(() => {
+    if (!window.speechSynthesis) {
+      console.warn("Speech Synthesis not supported in this browser.");
+      setIsSpeechSupported(false);
+      return;
+    }
+    
     const loadVoices = () => {
-      const availableVoices = window.speechSynthesis.getVoices();
-      setVoices(availableVoices);
+      try {
+        const availableVoices = window.speechSynthesis.getVoices();
+        setVoices(availableVoices);
+        setIsSpeechSupported(availableVoices.length > 0);
+      } catch (e) {
+        console.error("Failed to load voices:", e);
+      }
     };
 
     loadVoices();
@@ -325,75 +385,80 @@ export default function App() {
 
   // Speak Function
   const speak = (text: string) => {
-    if (!prefs.voiceEnabled) return;
+    if (!prefs.voiceEnabled || !window.speechSynthesis) return;
     
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    
-    // Improved voice selection
-    // Prioritize high-quality/premium voices
-    const maleVoiceNames = [
-      'google uk english male', 
-      'google us english male',
-      'microsoft david', 
-      'alex', 
-      'daniel', 
-      'guy', 
-      'james', 
-      'thomas', 
-      'male'
-    ];
-    const femaleVoiceNames = [
-      'google uk english female', 
-      'google us english female',
-      'samantha', 
-      'zira', 
-      'victoria', 
-      'siri', 
-      'female'
-    ];
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      
+      // Improved voice selection
+      // Prioritize high-quality/premium voices
+      const maleVoiceNames = [
+        'google uk english male', 
+        'google us english male',
+        'microsoft david', 
+        'alex', 
+        'daniel', 
+        'guy', 
+        'james', 
+        'thomas', 
+        'male'
+      ];
+      const femaleVoiceNames = [
+        'google uk english female', 
+        'google us english female',
+        'samantha', 
+        'zira', 
+        'victoria', 
+        'siri', 
+        'female'
+      ];
 
-    let selectedVoice = null;
-    const availableVoices = voices.length > 0 ? voices : window.speechSynthesis.getVoices();
+      let selectedVoice = null;
+      const availableVoices = voices.length > 0 ? voices : window.speechSynthesis.getVoices();
 
-    if (prefs.voiceMode === 'female') {
-      // Try to find the best match in order of priority
-      for (const name of femaleVoiceNames) {
-        selectedVoice = availableVoices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(name));
-        if (selectedVoice) break;
+      if (prefs.voiceMode === 'female') {
+        // Try to find the best match in order of priority
+        for (const name of femaleVoiceNames) {
+          selectedVoice = availableVoices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(name));
+          if (selectedVoice) break;
+        }
+      } else {
+        // Try to find the best match in order of priority
+        for (const name of maleVoiceNames) {
+          selectedVoice = availableVoices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(name));
+          if (selectedVoice) break;
+        }
       }
-    } else {
-      // Try to find the best match in order of priority
-      for (const name of maleVoiceNames) {
-        selectedVoice = availableVoices.find(v => v.lang.startsWith('en') && v.name.toLowerCase().includes(name));
-        if (selectedVoice) break;
+
+      // Fallback if no specific voice found
+      if (!selectedVoice) {
+        selectedVoice = availableVoices.find(v => v.lang.startsWith('en'));
       }
-    }
 
-    // Fallback if no specific voice found
-    if (!selectedVoice) {
-      selectedVoice = availableVoices.find(v => v.lang.startsWith('en'));
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+      }
+      
+      // Fine-tune pitch and rate for a "premium" feel
+      if (prefs.voiceMode === 'female') {
+        utterance.pitch = 1.05;
+        utterance.rate = 1.05;
+      } else {
+        // Deeper, slightly slower for a more "attractive/Jarvis" male voice
+        utterance.pitch = 0.88; 
+        utterance.rate = 0.95;
+      }
+      
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+      
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.error("Speech Synthesis failed:", e);
+      setIsSpeaking(false);
     }
-
-    if (selectedVoice) {
-      utterance.voice = selectedVoice;
-    }
-    
-    // Fine-tune pitch and rate for a "premium" feel
-    if (prefs.voiceMode === 'female') {
-      utterance.pitch = 1.05;
-      utterance.rate = 1.05;
-    } else {
-      // Deeper, slightly slower for a more "attractive/Jarvis" male voice
-      utterance.pitch = 0.88; 
-      utterance.rate = 0.95;
-    }
-    
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    
-    window.speechSynthesis.speak(utterance);
   };
 
   // Handle User Input
@@ -402,6 +467,13 @@ export default function App() {
     
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setInput('');
+
+    if (!chatRef.current) {
+      const errorMsg = "I apologize, Boss, but my AI core is not initialized. Please check your configuration.";
+      setMessages(prev => [...prev, { role: 'assistant', content: errorMsg }]);
+      speak(errorMsg);
+      return;
+    }
 
     try {
       const response = await chatRef.current.sendMessage({ message: text });
